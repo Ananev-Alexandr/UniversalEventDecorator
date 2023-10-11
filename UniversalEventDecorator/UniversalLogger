@@ -1,0 +1,53 @@
+import logging
+import time
+import traceback
+from logging.handlers import RotatingFileHandler
+
+import colorlog
+
+
+class UniversalLogger:
+    def __init__(self):
+        self.logger = colorlog.getLogger(__name__)
+        self.setup_logger()
+
+    def setup_logger(self):
+        log_colors = {
+            'DEBUG': 'cyan',
+            'INFO': 'green',
+            'WARNING': 'yellow',
+            'ERROR': 'red',
+            'CRITICAL': 'red,bg_white',
+        }
+        formatter = colorlog.ColoredFormatter(
+            "%(log_color)s%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+            log_colors=log_colors
+        )
+        self.logger.setLevel(logging.INFO)
+        self.set_up_stream_handler(formatter)
+        self.set_up_file_handler(formatter)
+
+    def set_up_stream_handler(self, formatter):
+        stream_handler = colorlog.StreamHandler()
+        stream_handler.setFormatter(formatter)
+        stream_handler.setLevel(logging.INFO)
+        self.logger.addHandler(stream_handler)
+
+    def set_up_file_handler(self, formatter):
+        file_handler = RotatingFileHandler('log_file.log', maxBytes=20000, backupCount=5)
+        file_handler.setFormatter(formatter)
+        file_handler.setLevel(logging.WARNING)  # Set level for this handler
+        self.logger.addHandler(file_handler)
+
+    def _logger_report(self, function_name, start_time):
+        """Создает отчет об успешном выполнении функции."""
+        execution_time = time.perf_counter() - start_time  # secs
+        self.logger.info(f"Функция {function_name} отработала успешно за {execution_time:.2f} секунд.")
+
+    def _handle_error(self, e, function_name):
+        tb = traceback.format_exc()
+        self.logger.error(f"Произошла ошибка в функции {function_name}: {e}\n{tb}")
+
+        # Проверка, является ли исключение HTTP-исключением или имеет атрибут 'status_code'
+        if hasattr(e, 'status_code') or type(e).__name__ == "HTTPException":
+            raise e
