@@ -1,51 +1,33 @@
 import asyncio
 import functools
-import logging
-import colorlog
 import time
-import traceback
+import gc
+
+from UniversalEventDecorator.UniversalLogger import UniversalLogger
 
 
-import_flag = False
+has_fastapi = False
+has_torch = False
 
 try:
     from fastapi import HTTPException
-    import_flag = True
-except Exception:
-    pass
+    has_fastapi = True
+except ImportError:
+    print("Warning: fastapi is not available")
+
+try:
+    import torch
+    has_torch = True
+except ImportError:
+    print("Warning: torch is not available")
 
 
-class UniversalEventDecorator:
-    formatter = colorlog.ColoredFormatter(
-        "%(log_color)s%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-        log_colors={
-            'DEBUG':    'cyan',
-            'INFO':     'green',
-            'WARNING':  'yellow',
-            'ERROR':    'red',
-            'CRITICAL': 'red,bg_white',
-        }
-    )
-
-    def __init__(self):
-        # Создание логгера и установка уровня логирования
-        self.logger = colorlog.getLogger(__name__)
-        self.logger.setLevel(logging.INFO)
-
-        # Потоковый обработчик, который выводит логи на консоль
-        stream_handler = colorlog.StreamHandler()
-        stream_handler.setFormatter(self.formatter)
-        self.logger.addHandler(stream_handler)
-
-    def _logger_report(self, function_name, start_time):
-        """Создает отчет об успешном выполнении функции."""
-        execution_time = time.perf_counter() - start_time  # secs
-        self.logger.info(f"Функция {function_name} отработала успешно за {execution_time:.2f} секунд.")
+class UniversalEventDecorator(UniversalLogger):
 
     def __call__(self, func):
         function_name = func.__name__ if hasattr(func, '__name__') else repr(func)
 
-        # Проверка, является ли функция асинхронной
+        # Обертка для асинхронных функций
         if asyncio.iscoroutinefunction(func):
             @functools.wraps(func)
             async def async_wrapper(*args, **kwargs):
@@ -56,20 +38,15 @@ class UniversalEventDecorator:
                     self._logger_report(function_name, start_time)
                     return result
                 except Exception as e:
-                    self._handle_error(e, function_name)
-                    if import_flag:
-                        raise HTTPException(
-                            status_code=500,
-                            detail=e.__str__()
-                        )
-                    else:
-                        return {
-                            "status_code": 500,
-                            "message": e.__str__()
-                            }
+                    return self._handle_exception(e, function_name)
+                finally:
+                    if has_torch:
+                        gc.collect()
+                        torch.cuda.empty_cache()
 
             return async_wrapper
 
+        # Обертка для синхронных функций
         else:
             @functools.wraps(func)
             def sync_wrapper(*args, **kwargs):
@@ -80,27 +57,33 @@ class UniversalEventDecorator:
                     self._logger_report(function_name, start_time)
                     return result
                 except Exception as e:
-                    self._handle_error(e, function_name)
-                    if import_flag:
-                        raise HTTPException(
-                            status_code=500,
-                            detail=e.__str__()
-                        )
-                    else:
-                        return {
-                            "status_code": 500,
-                            "message": e.__str__()
-                            }
+                    return self._handle_exception(e, function_name)
+                finally:
+                    if has_torch:
+                        gc.collect()
+                        torch.cuda.empty_cache()
 
             return sync_wrapper
 
-    def _handle_error(self, e, function_name):
-        tb = traceback.format_exc()
-        logger.error(f"Произошла ошибка в функции {function_name}: {e}\n{tb}")
+    # Очистка памяти после выполнения функции
+    def _final_cleanup(self):
+        if has_torch:
+            gc.collect()
+            torch.cuda.empty_cache()
 
-        # Проверка, является ли исключение HTTP-исключением или имеет атрибут 'status_code'
-        if hasattr(e, 'status_code') or type(e).__name__ == "HTTPException":
-            raise e
+    # Обработка исключений
+    def _handle_exception(self, e, function_name):
+        self._handle_error(e, function_name)
+        if has_fastapi:
+            raise HTTPException(
+                status_code=500,
+                detail=e.__str__()
+            )
+        else:
+            return {
+                "status_code": 500,
+                "message": e.__str__()
+            }
 
 
 universal_event_decorator = UniversalEventDecorator()
