@@ -1,1 +1,4 @@
-# UniversalEventDecorator
+from UniversalEventDecorator.UniversalEventDecorator import universal_event_decorator
+
+@universal_event_decorator
+you_router
